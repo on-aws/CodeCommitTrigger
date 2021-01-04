@@ -1,0 +1,70 @@
+Description: |-
+  This template creates AWS Lambda which start CodeBuild on CodeCommit repositiry changes
+
+Parameters:
+  CodeBuildProjectName:
+    Description: CodeBuild Project Name
+    Type: String
+
+Resources:
+  TriggerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - codebuild:StartBuild
+                Effect: Allow
+                Resource:
+                  - !Sub arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/${CodeBuildProjectName}
+          PolicyName: trigger-policy
+
+  Trigger:
+    Type: AWS::Lambda::Function
+    Properties:
+      Environment:
+        Variables:
+          CodeBuild: !Ref CodeBuildProjectName
+      Handler: index.handler
+      Role: !GetAtt TriggerRole.Arn
+      Runtime: nodejs12.x
+      Code:
+        ZipFile: |
+          'use strict';
+          const AWS   = require('aws-sdk');
+          const codebuild = new AWS.CodeBuild();
+          exports.handler = async (event, context) => {
+            console.log(JSON.stringify(event));
+            await codebuild.startBuild({
+              projectName: process.env.CodeBuild
+            }).promise();
+            return;
+          };
+
+  TriggerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${Trigger}
+      RetentionInDays: 1
+
+  PermissionForCodeCommitToInvokeTrigger:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref Trigger
+      Principal: codecommit.amazonaws.com
